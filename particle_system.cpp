@@ -3,7 +3,6 @@
 #include "config.h"
 #include "types.h"
 #include "concurency.h"
-#include "util.h"
 
 #include "particle_system.h"
 
@@ -13,6 +12,30 @@ gl::particle_system::particle_system(void) {
 
 
 gl::particle_system::~particle_system(void) {
+}
+
+void gl::particle_system::init_particle_arrays() {		
+	std::srand(std::time(nullptr));
+
+	for (unsigned int i = 0; i < GL_PARTICLE_NUMBER_TOTAL; i++) {
+		particle p;
+
+		// set initial life life (dead)
+		p.life = -1.f;
+
+		// set random seed
+		p.rand = std::rand();
+
+		// set speed
+		float angle, speed;
+		generate_random(0.f, 360.f, angle, p.rand);
+		generate_random(GL_PARTICLE_MIN_SPEED, GL_PARTICLE_MAX_SPEED, speed, p.rand);
+		p.speed.x = speed*std::cos(angle);
+		p.speed.y = speed*std::sin(angle);
+		p.r = p.g = p.b = p.a = 255.f;
+
+		first[i] = second[i] = p;
+	}
 }
 
 particle_buffer_ptr gl::particle_system::aquireInterlockedRenderParticlesPtr(){
@@ -26,26 +49,36 @@ void gl::particle_system::releaseInterlockedRenderParticlesPtr() {
 
 void gl::particle_system::generateBlast(int x, int y) {
 	vec2f point;
+	std::cout << "x: " << x << ", y: " << y << ";" << std::endl;
 	point.x = static_cast<float>(x);
-	point.y = static_cast<float>(y);
+	point.y = static_cast<float>(scrHeight - y);
 	blastQueue.push(point);
 }
 
-void gl::particle_system::init() {
+void gl::particle_system::init(float scrWidth_, float scrHeight_) {
 	assert(GL_PARTICLE_NUMBER_TOTAL > 254);
 	assert(GL_THREAD_NUMBER > 0 && GL_THREAD_NUMBER < 4);
 
+	scrHeight = scrHeight_;
+	scrWidth = scrWidth_;
+	deltaDelay = 0;
+
+	init_particle_arrays();
+
+	unsigned int blastPerArea = GL_PARTICLE_NUMBER_BLAST / GL_THREAD_NUMBER, blastCntr = GL_PARTICLE_NUMBER_BLAST;
+	assert(blastPerArea > 1);
+
 	updatePtr = &second;
 	renderPtr = &first;
-
-	set_rndgen_seed();
-
+	
 	unsigned int particalNumForThread = GL_PARTICLE_NUMBER_TOTAL / GL_THREAD_NUMBER;
 	unsigned int curIdx = 0;
 	for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i) {
 		unsigned int endIdx = (i == GL_THREAD_NUMBER - 1) ? GL_PARTICLE_NUMBER_TOTAL : curIdx + particalNumForThread;
 		taskAreas[i] = std::make_pair(curIdx, endIdx);
 		curIdx += particalNumForThread;
+		blastPerAreaArr[i] = (i == (GL_THREAD_NUMBER - 1) ) ? blastCntr : blastPerArea;
+		blastCntr -= blastPerArea;
 	}
 
 	threadPool = std::unique_ptr<thread_pool>(new thread_pool(GL_THREAD_NUMBER));
@@ -57,19 +90,20 @@ void gl::particle_system::fini() {
 
 void gl::particle_system::update(float delta) {
 	std::array<std::unique_ptr<task>, GL_THREAD_NUMBER> taskQueue;
-
-
-
-
-	for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i)	{
-		std::unique_ptr<vec2f> blastPoint = blastQueue.pop();
-		if (blastPoint) {
-			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new blast_task(updatePtr, *blastPoint, taskAreas[i].first, taskAreas[i].second, GL_PARTICLE_NUMBER_BLAST)));
-		} else {
-			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new update_task(updatePtr, renderPtr, delta, taskAreas[i].first, taskAreas[i].second, &blastQueue)));		
-		}
-	}
 	
+	std::unique_ptr<vec2f> blastPoint = blastQueue.pop();
+	if (blastPoint && (deltaDelay < GL_MAX_DELTA_DELAY)) {
+		deltaDelay += delta;
+		for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i) {
+			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new blast_task(*this, *blastPoint, taskAreas[i].first, taskAreas[i].second, blastPerAreaArr[i])));
+		}
+	} else {
+		for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i) {
+			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new update_task(*this, delta+deltaDelay, taskAreas[i].first, taskAreas[i].second)));
+		}
+		deltaDelay = 0.f;
+	}
+
 	for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i)	{
 		threadPool->submit([&taskQueue, i]() {
 			taskQueue[i]->run();
@@ -87,43 +121,61 @@ void gl::particle_system::update(float delta) {
 
 void gl::blast_task::run()
 {
-	// populate particles
 	for(unsigned int i = begin; i < end; ++i) {
-		particle* p = &(*updatePtr)[i];
-		if (p->life <= 0) {
-			particle_generate(*p, point); 
-		}
-		if (--newPoints == 0) {
-			break;
+		(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
+		particle& up = (*ps.updatePtr)[i];
+		if (up.life < 0) {
+			particle_generate(up, point);
+			if (--newPoints == 0) {
+				break;
+			}
 		}
 	}
-
 }
 
 void gl::update_task::run()
 {
 	// update particles
 	for(unsigned int i = begin; i < end; ++i) {
-		particle& p = (*updatePtr)[i];
+
+		(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
+		particle& up = (*ps.updatePtr)[i];
+		//const particle& rp = (*ps.renderPtr)[i];
 		
-		if (p.life <= 0.f) {
+		if (up.life < 0.f) {
 			continue;
 		}
 
-		p.life -= delta;
-
-		// todo: check out of screen particles
-
-		if (p.life <= 0.f) {
+		if ((up.pos.x > ps.scrWidth) || (up.pos.x < 0) || (up.pos.y < 0) || (up.pos.y > ps.scrHeight)) {
+			up.life = -1.f;
 			continue;
 		}
 
-		vec2f t1(1.f, 1.f);
+		up.life -= delta;
+		if (up.life < 0.f ) {
+			if (probability_perc(GL_PARTICLE_BLAST_CHANCE_PERC, std::rand())) {
+				vec2f point;
+				point.x = up.pos.x;
+				point.y = up.pos.y;
+				ps.blastQueue.push(point);
+			}
+			continue;
+		}
 
-		t1 += vec2f(2.f, 2.f);
-
-
-		p.speed += vec2f(0.0f,-9.81f) * delta;
-		p.pos += p.speed * delta;
+		up.pos += up.speed * delta;
 	}
+}
+
+void gl::task::particle_generate(particle& p, const vec2f& v)
+{
+	// set coordinates
+	p.pos.x = v.x;
+	p.pos.y = v.y;
+
+	// set life
+	generate_random(GL_PARTICLE_MIN_LIFE_MS, GL_PARTICLE_MAX_LIFE_MS, p.life, p.rand);
+}
+
+bool gl::task::probability_perc(int perc, int rnd) {
+	return (rnd % 100) < perc;
 }

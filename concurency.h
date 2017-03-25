@@ -200,7 +200,7 @@ namespace gl {
 			oper_cntr.store(0);
 			try {
 				for(unsigned i=0; i < thread_num; ++i) {
-					threads.push_back(std::thread(&thread_pool::worker_thread,this));
+					threads.push_back(std::move(std::thread(&thread_pool::worker_thread,this)));
 				}
 			} catch(...) {
 				done.store(true);

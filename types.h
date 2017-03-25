@@ -14,31 +14,21 @@ namespace gl {
 			return *this;
 		}
 
-		friend const vec2f operator+(const vec2f& left, const vec2f& right); 
-		
-		template<typename T>
-		friend const vec2f operator*(const vec2f& left, T& right);
+		friend const vec2f operator+(const vec2f& left, const vec2f& right) {
+			return vec2f(left.x+right.x, left.y+right.y);
+		}
+
+		vec2f vec2f::operator* (float right) const {
+		return vec2f(x*right, y*right);
+	}
 	};
 
 	struct particle {
-		particle() : life(-1.f) {}
-
 		vec2f pos;
 		vec2f speed;
 		float life;
-		float weight;
-		float angle;
 		float r, g, b, a;
+		int rand;
 	};
-	
-	const vec2f operator+(const vec2f& left, const vec2f& right);
-
-	template<typename T>
-	const vec2f operator*(const vec2f& left, T& right) {
-		return vec2f(left.x+static_cast<float>(right), left.y+static_cast<float>(right));		
-	}
-
-
-
 }
 

@@ -45,7 +45,7 @@ void WorkerThread(void)
 void test::init(void)
 {
 	// some code
-	particleSystem.init();
+	particleSystem.init(SCREEN_WIDTH, SCREEN_HEIGHT);
 
 	std::thread workerThread(WorkerThread);
 	workerThread.detach(); // Glut + MSVC = join hangs in atexit()
@@ -67,8 +67,7 @@ void test::render(void)
 	auto renderPtr = particleSystem.aquireInterlockedRenderParticlesPtr();
 	for (auto it = renderPtr->begin(); it != renderPtr->end(); ++it) {
 		if (it->life > 0.f) {
-			platform::drawPoint(it->pos.x, it->pos.y, 255.f, 255.f, 255.f, 255.f);
-			//platform::drawPoint(it->pos.x, it->pos.y, it->r, it->g, it->b, it->a);
+			platform::drawPoint(it->pos.x, it->pos.y, it->r, it->g, it->b, it->a);
 		}
 	}
 	particleSystem.releaseInterlockedRenderParticlesPtr();

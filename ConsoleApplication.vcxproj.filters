@@ -103,12 +103,6 @@
     <ClCompile Include="particle_system.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="util.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="types.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="test.h">
@@ -121,6 +115,5 @@
     <ClInclude Include="concurency.h" />
     <ClInclude Include="defines.h" />
     <ClInclude Include="particle_system.h" />
-    <ClInclude Include="util.h" />
   </ItemGroup>
 </Project>

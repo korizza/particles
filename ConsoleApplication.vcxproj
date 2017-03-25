@@ -42,8 +42,6 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="particle_system.cpp" />
     <ClCompile Include="test.cpp" />
-    <ClCompile Include="types.cpp" />
-    <ClCompile Include="util.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
@@ -52,7 +50,6 @@
     <ClInclude Include="particle_system.h" />
     <ClInclude Include="test.h" />
     <ClInclude Include="types.h" />
-    <ClInclude Include="util.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{B3FFBEF9-7B94-488A-98BE-0079263B9E95}</ProjectGuid>
