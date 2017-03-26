@@ -9,165 +9,88 @@ namespace gl {
 		void unlock();
 	};
 
-	template <typename T>
-	class mpmc_queue {
-	  private:
-		struct node;
-		struct counted_node_ptr {
-			int external_count;
-			node* ptr;
-		};
-
-		std::atomic<counted_node_ptr> head;
-		std::atomic<counted_node_ptr> tail;
-
-		struct node_counter {
-			unsigned internal_count:30;
-			unsigned external_counters:2;
-		};
-
+	template<typename T, unsigned int SIZE>
+	class mpmc_circular_queue {
+	private:
 		struct node {
-			std::atomic<T*> data;
-			std::atomic<node_counter> count;
-			std::atomic<counted_node_ptr> next;
-
-			node() {
-				node_counter new_count;
-				new_count.internal_count = 0;
-				new_count.external_counters = 2; 
-				count.store(new_count);
-
-				counted_node_ptr new_next;
-				new_next.ptr = nullptr;
-				new_next.external_count = 0;
-				next.store(new_next);
-			}
-
-			void release_ref() {
-				node_counter old_counter = count.load(std::memory_order_relaxed);
-				node_counter new_counter;
-				do {
-					new_counter = old_counter;
-					--new_counter.internal_count;
-				} while (!count.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire, std::memory_order_relaxed));
-	
-				if (!new_counter.internal_count && !new_counter.external_counters)	{
-					delete this;
-				}
-			}
+			T data;
+			std::atomic<unsigned int> counter;
 		};
-
-		void set_new_tail(counted_node_ptr &old_tail, counted_node_ptr const &new_tail) {
-			node* const current_tail_ptr = old_tail.ptr;
-			while(!tail.compare_exchange_weak(old_tail,new_tail) && old_tail.ptr == current_tail_ptr);
-			if(old_tail.ptr == current_tail_ptr) {
-				free_external_counter(old_tail);
-			} else {
-				current_tail_ptr->release_ref();
+	public:
+		mpmc_circular_queue() : last_idx(SIZE - 1) {
+			for (unsigned int i = 0; i < SIZE; ++i) {
+				buffer[i].counter.store(i, std::memory_order_relaxed);
 			}
+			head.store(0, std::memory_order_relaxed);
+			tail.store(0, std::memory_order_relaxed);
 		}
+		~mpmc_circular_queue() {}
 
-		static void increase_external_count(std::atomic<counted_node_ptr>& counter, counted_node_ptr& old_counter) {
-			counted_node_ptr new_counter;
-			do {
-				new_counter = old_counter;
-				++new_counter.external_count;
-			}
-
-			while(!counter.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
-			old_counter.external_count = new_counter.external_count;
-		}
-
-		static void free_external_counter(counted_node_ptr &old_node_ptr) {
-			node* const ptr = old_node_ptr.ptr;
-			int const count_increase = old_node_ptr.external_count-2;
-			node_counter old_counter = ptr->count.load(std::memory_order_relaxed);
-			node_counter new_counter;
+		bool push(T const& data) {
+			node* ptr;
+			unsigned int pos = 0;
 
 			do {
-				new_counter=old_counter;
-				--new_counter.external_counters;
-				new_counter.internal_count+=count_increase;
-			}
+				pos = tail.load(std::memory_order_relaxed);
+				ptr = &buffer[pos & last_idx];
+				unsigned int counter = ptr->counter.load(std::memory_order_acquire);
+				long int dif = (long int)counter - (long int)pos;
 
-			while(!ptr->count.compare_exchange_strong(old_counter, new_counter, std::memory_order_acquire,std::memory_order_relaxed));
-	
-			if(!new_counter.internal_count && !new_counter.external_counters) {
-				delete ptr;
-			}
-		}
-
-		// hidden
-		mpmc_queue(const mpmc_queue& other) {};
-		mpmc_queue& operator=(const mpmc_queue& other) {};
-
-	  public:
-		mpmc_queue() {
-			counted_node_ptr cntr;
-			cntr.external_count = 0;
-			cntr.ptr = new node;
-			head.store(cntr);
-			tail.store(head);
-		}
-		~mpmc_queue() {
-			while (pop());
-			counted_node_ptr cntr = head.load();
-			delete cntr.ptr;
-		}
-
-		void push(T new_value) {
-			std::unique_ptr<T> new_data(new T(new_value));
-			counted_node_ptr new_next;
-			new_next.ptr = new node;
-			new_next.external_count=1;
-			counted_node_ptr old_tail=tail.load();
-
-			for(;;) {
-				increase_external_count(tail,old_tail);
-				T* old_data=nullptr;
-				if(old_tail.ptr->data.compare_exchange_strong(old_data,new_data.get())) {
-					counted_node_ptr old_next={0};
-					if(!old_tail.ptr->next.compare_exchange_strong(old_next,new_next)) {
-						delete new_next.ptr;
-						new_next=old_next;
+				if (dif == 0) {
+					if (tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+						break;
 					}
-					set_new_tail(old_tail, new_next);
-					new_data.release();
-					break;
+				} else if (dif < 0) {
+					return false;
 				} else {
-					counted_node_ptr old_next={0};
-					if(old_tail.ptr->next.compare_exchange_strong(old_next,new_next)) {
-						old_next=new_next;
-						new_next.ptr=new node;
+					pos = tail.load(std::memory_order_relaxed);
+				}
+			} while(true);
+
+			ptr->data = data;
+			ptr->counter.store(pos + 1, std::memory_order_release);
+			return true;
+		}
+
+		bool pop(T& data)
+		{
+			node* ptr;
+			unsigned int pos = 0;
+
+			do {
+				pos = head.load(std::memory_order_relaxed);
+				ptr = &buffer[pos & last_idx];
+				unsigned counter = ptr->counter.load(std::memory_order_acquire);
+				long int dif = (long int)counter - (long int)(pos + 1);
+
+				if (dif == 0){
+					if (head.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+						break;
 					}
-					set_new_tail(old_tail, old_next);
+				} else if (dif < 0) {
+					return false;
+				} else {
+					pos = head.load(std::memory_order_relaxed);
 				}
-			}
+			} while (true);
+
+			data = ptr->data;
+			ptr->counter.store(pos + last_idx + 1, std::memory_order_release);
+			return true;
 		}
 
-		std::unique_ptr<T> pop() {
-			counted_node_ptr old_head = head.load(std::memory_order_relaxed);
-			for(;;) {
-				increase_external_count(head, old_head);
+	private:
+		std::array<node, SIZE> buffer;
+		const unsigned int last_idx;
+		std::atomic<unsigned int> head;
+		std::atomic<unsigned int> tail;
 
-				node* const ptr = old_head.ptr;
-				if (ptr==tail.load().ptr) {
-					ptr->release_ref();
-					return std::unique_ptr<T>();
-				}
-
-				counted_node_ptr next = ptr->next.load();
-
-				if (head.compare_exchange_strong(old_head, next)) {
-					T* const res=ptr->data.exchange(nullptr);
-					free_external_counter(old_head);
-					return std::unique_ptr<T>(res);
-				}
-				ptr->release_ref();
-			}
-		}
+	private:
+		// hidden
+		mpmc_circular_queue(mpmc_circular_queue const&);
+		void operator= (mpmc_circular_queue const&);
 	};
-
+	
 	class thread_joiner {
 		std::vector<std::thread>& threads; 
 	public:
@@ -175,19 +98,20 @@ namespace gl {
 		~thread_joiner();
 	};
 
-	class thread_pool
-	{
+	template<unsigned int THREAD_NUM = 2>
+	class thread_pool {
 		std::atomic_bool done;
-		mpmc_queue<std::function<void()>> work_queue;
+		mpmc_circular_queue<std::function<void()>, THREAD_NUM> work_queue;
+		//mpmc_queue<std::function<void()>> work_queue;
 		std::atomic<unsigned int> oper_cntr;
 		std::vector<std::thread> threads;
 		thread_joiner joiner;
 
 		void worker_thread() {
 			while(!done){
-				auto task = work_queue.pop();
-				if(task) {
-					(*task)();
+				std::function<void()> task;
+				if(work_queue.pop(task)) {
+					task();
 					oper_cntr.fetch_sub(1);
 				} else {
 					std::this_thread::yield();
@@ -195,11 +119,11 @@ namespace gl {
 			}
 		}
 	public:
-		thread_pool(unsigned int thread_num) : joiner(threads) {
+		thread_pool() : joiner(threads) {
 			done.store(false);
 			oper_cntr.store(0);
 			try {
-				for(unsigned i=0; i < thread_num; ++i) {
+				for(unsigned i=0; i < THREAD_NUM; ++i) {
 					threads.push_back(std::move(std::thread(&thread_pool::worker_thread,this)));
 				}
 			} catch(...) {

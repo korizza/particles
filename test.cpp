@@ -17,7 +17,7 @@
 
 static std::atomic<float> globalTime;
 static volatile bool workerMustExit = false;
-gl::particle_system particleSystem;
+std::unique_ptr<gl::particle_system> particleSystem;
 
 
 // some code
@@ -33,7 +33,7 @@ void WorkerThread(void)
 		float delta = time - lastTime;
 		lastTime = time;
 
-		if (delta > 0) particleSystem.update(delta);
+		if (delta > 0) particleSystem->update(delta);
 		
 		if (delta < 10)
 			std::this_thread::sleep_for(std::chrono::milliseconds(10 - static_cast<int>(delta*1000.f)));
@@ -45,7 +45,8 @@ void WorkerThread(void)
 void test::init(void)
 {
 	// some code
-	particleSystem.init(SCREEN_WIDTH, SCREEN_HEIGHT);
+	particleSystem = std::unique_ptr<gl::particle_system>(new gl::particle_system());
+	particleSystem->init(SCREEN_WIDTH, SCREEN_HEIGHT);
 
 	std::thread workerThread(WorkerThread);
 	workerThread.detach(); // Glut + MSVC = join hangs in atexit()
@@ -58,19 +59,19 @@ void test::term(void)
 	// some code
 
 	workerMustExit = true;
-	particleSystem.fini();
+	particleSystem->fini();
 	// some code
 }
 
 void test::render(void)
 {
-	auto renderPtr = particleSystem.aquireInterlockedRenderParticlesPtr();
+	auto renderPtr = particleSystem->aquireInterlockedRenderParticlesPtr();
 	for (auto it = renderPtr->begin(); it != renderPtr->end(); ++it) {
 		if (it->life > 0.f) {
 			platform::drawPoint(it->pos.x, it->pos.y, it->r, it->g, it->b, it->a);
 		}
 	}
-	particleSystem.releaseInterlockedRenderParticlesPtr();
+	particleSystem->releaseInterlockedRenderParticlesPtr();
 }
 
 void test::update(int dt)
@@ -85,5 +86,5 @@ void test::update(int dt)
 
 void test::on_click(int x, int y)
 {
-	particleSystem.generateBlast(x, y);
+	particleSystem->generateBlast(x, y);
 }

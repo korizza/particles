@@ -2,7 +2,7 @@
 
 typedef std::array<gl::particle, GL_PARTICLE_NUMBER_TOTAL> particle_buffer, *particle_buffer_ptr;
 typedef std::array<std::pair<unsigned int, unsigned int>, GL_THREAD_NUMBER> task_areas;
-typedef gl::mpmc_queue<gl::vec2f> blast_queue;
+typedef gl::mpmc_circular_queue<gl::vec2f, GL_PARTICLE_EFFECTS_TOTAL> blast_queue;
 
 namespace gl {
 	template<typename T>
@@ -37,8 +37,8 @@ namespace gl {
 
 		spinlock renderLock;
 
-		std::unique_ptr<thread_pool> threadPool;
-		mpmc_queue<vec2f> blastQueue;
+		std::unique_ptr<thread_pool<GL_THREAD_NUMBER>> threadPool;
+		blast_queue blastQueue;
 		task_areas taskAreas;
 		std::array<unsigned int, GL_THREAD_NUMBER> blastPerAreaArr;
 		float deltaDelay;
@@ -75,7 +75,7 @@ namespace gl {
 
 	class blast_task : public task {
 	public:
-		blast_task(particle_system& ps_, gl::vec2f point_, unsigned int begin_, unsigned int end_, unsigned int newPoints_) : point(point_), newPoints(newPoints_), ps(ps_) { 
+		blast_task(particle_system& ps_, const gl::vec2f& point_, unsigned int begin_, unsigned int end_, unsigned int newPoints_) : point(point_), newPoints(newPoints_), ps(ps_) { 
 			begin = begin_; 
 			end = end_; 
 		}

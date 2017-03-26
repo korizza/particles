@@ -57,7 +57,6 @@ void gl::particle_system::generateBlast(int x, int y) {
 
 void gl::particle_system::init(float scrWidth_, float scrHeight_) {
 	assert(GL_PARTICLE_NUMBER_TOTAL > 254);
-	assert(GL_THREAD_NUMBER > 0 && GL_THREAD_NUMBER < 4);
 
 	scrHeight = scrHeight_;
 	scrWidth = scrWidth_;
@@ -81,7 +80,7 @@ void gl::particle_system::init(float scrWidth_, float scrHeight_) {
 		blastCntr -= blastPerArea;
 	}
 
-	threadPool = std::unique_ptr<thread_pool>(new thread_pool(GL_THREAD_NUMBER));
+	threadPool = std::unique_ptr<thread_pool<GL_THREAD_NUMBER>>(new thread_pool<GL_THREAD_NUMBER>());
 }
 
 void gl::particle_system::fini() {
@@ -91,11 +90,11 @@ void gl::particle_system::fini() {
 void gl::particle_system::update(float delta) {
 	std::array<std::unique_ptr<task>, GL_THREAD_NUMBER> taskQueue;
 	
-	std::unique_ptr<vec2f> blastPoint = blastQueue.pop();
-	if (blastPoint && (deltaDelay < GL_MAX_DELTA_DELAY)) {
+	vec2f blastPoint;
+	if (blastQueue.pop(blastPoint) && (deltaDelay < GL_MAX_DELTA_DELAY)) {
 		deltaDelay += delta;
 		for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i) {
-			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new blast_task(*this, *blastPoint, taskAreas[i].first, taskAreas[i].second, blastPerAreaArr[i])));
+			taskQueue[i] = std::unique_ptr<task>(dynamic_cast<task*>(new blast_task(*this, blastPoint, taskAreas[i].first, taskAreas[i].second, blastPerAreaArr[i])));
 		}
 	} else {
 		for (unsigned int i = 0; i < GL_THREAD_NUMBER; ++i) {
@@ -140,7 +139,6 @@ void gl::update_task::run()
 
 		(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
 		particle& up = (*ps.updatePtr)[i];
-		//const particle& rp = (*ps.renderPtr)[i];
 		
 		if (up.life < 0.f) {
 			continue;
