@@ -125,15 +125,19 @@ void gl::particle_system::update(float delta) {
 		std::this_thread::yield();
 	}
 
+	// swap pointers
 	renderLock.lock();
 	std::swap(renderPtr, updatePtr);
 	renderLock.unlock();
+
+	// copy origin data to update array 
+	std::copy(renderPtr->begin(), renderPtr->end(), updatePtr->begin());
 }
 
 void gl::blast_task::run()
 {
 	for(unsigned int i = begin; i < end; ++i) {
-		(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
+		//(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
 		particle& up = (*ps.updatePtr)[i];
 		if (up.life < 0) {
 			particle_generate(up, point);
@@ -148,15 +152,14 @@ void gl::update_task::run()
 {
 	// update particles
 	for(unsigned int i = begin; i < end; ++i) {
-
-		(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
+		//(*ps.updatePtr)[i] = (*ps.renderPtr)[i];
 		particle& up = (*ps.updatePtr)[i];
 		
 		if (up.life < 0.f) {
 			continue;
 		}
 
-		if ((up.pos.x > ps.scrWidth) || (up.pos.x < 0) || (up.pos.y < 0) || (up.pos.y > ps.scrHeight)) {
+		if ((up.pos.x > ps.scrWidth) || (up.pos.x < 0.f) || (up.pos.y < 0.f) || (up.pos.y > ps.scrHeight)) {
 			up.life = -1.f;
 			continue;
 		}
