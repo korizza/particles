@@ -21,6 +21,7 @@ gl::thread_joiner::thread_joiner(std::vector<std::thread>& threads_) : threads(t
 
 gl::thread_joiner::~thread_joiner()
 {
+	// join the threads in the constructor
 	for(unsigned long i=0;i<threads.size();++i)	{
 		if(threads[i].joinable()) {
 			threads[i].join();

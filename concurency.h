@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 namespace gl {
+
+	// lockfree spinlock
 	class spinlock {
 		std::atomic_flag lockFlag;
 	public:
@@ -9,12 +11,14 @@ namespace gl {
 		void unlock();
 	};
 
+	// mmpc lockfree circular queue 
 	template<typename T, unsigned int SIZE>
 	class mpmc_circular_queue {
 	private:
+		// node
 		struct node {
-			T data;
-			std::atomic<unsigned int> counter;
+			T data; // data
+			std::atomic<unsigned int> counter; // offset ref counter
 		};
 	public:
 		mpmc_circular_queue() : last_idx(SIZE - 1) {
@@ -26,6 +30,7 @@ namespace gl {
 		}
 		~mpmc_circular_queue() {}
 
+		// regular push item
 		bool push(T const& data) {
 			node* ptr;
 			unsigned int pos = 0;
@@ -52,6 +57,35 @@ namespace gl {
 			return true;
 		}
 
+		// force push (in case of item with high priority
+		void force_push(T const& data) {
+			node* ptr;
+			unsigned int pos;
+  
+			do {
+				pos = tail.load(std::memory_order_relaxed);
+				ptr = &buffer[pos & last_idx];
+				unsigned int counter = ptr->counter.load(std::memory_order_acquire);
+				long int dif = (long int)counter - (long int)pos;
+
+				if (dif == 0) {
+					if (tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+						break;
+					}
+				} else {
+					unsigned int head_pos = pos - SIZE;
+					if (head.compare_exchange_weak(head_pos, head_pos + 1, std::memory_order_relaxed)) {
+						tail.store(pos + 1, std::memory_order_relaxed);
+						break;
+					}
+				}
+			} while (true);
+
+			ptr->data = data;
+			ptr->counter.store(pos + 1, std::memory_order_release);  
+		}
+
+		// pop item
 		bool pop(T& data)
 		{
 			node* ptr;
@@ -80,10 +114,10 @@ namespace gl {
 		}
 
 	private:
-		std::array<node, SIZE> buffer;
-		const unsigned int last_idx;
-		std::atomic<unsigned int> head;
-		std::atomic<unsigned int> tail;
+		std::array<node, SIZE> buffer; // buffer
+		const unsigned int last_idx; // idx of the last element
+		std::atomic<unsigned int> head; // atomic idx of the head element
+		std::atomic<unsigned int> tail; // atomic idx of the tail element
 
 	private:
 		// hidden
@@ -91,6 +125,7 @@ namespace gl {
 		void operator= (mpmc_circular_queue const&);
 	};
 	
+	// simple RAII for joining threads
 	class thread_joiner {
 		std::vector<std::thread>& threads; 
 	public:
@@ -98,15 +133,16 @@ namespace gl {
 		~thread_joiner();
 	};
 
+	// thread pool
 	template<unsigned int THREAD_NUM = 2>
 	class thread_pool {
-		std::atomic_bool done;
-		mpmc_circular_queue<std::function<void()>, THREAD_NUM> work_queue;
-		//mpmc_queue<std::function<void()>> work_queue;
-		std::atomic<unsigned int> oper_cntr;
-		std::vector<std::thread> threads;
-		thread_joiner joiner;
+		std::atomic_bool done; // finish job
+		mpmc_circular_queue<std::function<void()>, THREAD_NUM> work_queue; // mpcp work queue
+		std::atomic<unsigned int> oper_cntr; // atomic counter of queued operations
+		std::vector<std::thread> threads; // threads
+		thread_joiner joiner; // thread joiner
 
+		// thread routine
 		void worker_thread() {
 			while(!done){
 				std::function<void()> task;
@@ -136,11 +172,13 @@ namespace gl {
 			done.store(true);
 		}
 
+		// returns true is the poool is busy
 		bool in_progress() {
 			unsigned int cntr = oper_cntr.load();
 			return cntr != 0;
 		}
 
+		// gets a new function to the work queue
 		template<typename FunctionType>
 		void submit(FunctionType f) {
 			work_queue.push(std::function<void()>(f));

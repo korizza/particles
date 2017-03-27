@@ -49,13 +49,15 @@ void gl::particle_system::releaseInterlockedRenderParticlesPtr() {
 
 void gl::particle_system::generateBlast(int x, int y) {
 	vec2f point;
-	std::cout << "x: " << x << ", y: " << y << ";" << std::endl;
 	point.x = static_cast<float>(x);
 	point.y = static_cast<float>(scrHeight - y);
-	blastQueue.push(point);
+	blastQueue.force_push(point);
 }
 
 void gl::particle_system::init(float scrWidth_, float scrHeight_) {
+
+	hasExit = false;
+
 	assert(GL_PARTICLE_NUMBER_TOTAL > 254);
 
 	scrHeight = scrHeight_;
@@ -84,10 +86,20 @@ void gl::particle_system::init(float scrWidth_, float scrHeight_) {
 }
 
 void gl::particle_system::fini() {
+	hasExit = true;
+
+	while (threadPool->in_progress())	{
+		std::this_thread::yield();
+	}
+
 	threadPool.release();
 }
 
 void gl::particle_system::update(float delta) {
+	if (hasExit) {
+		return;
+	}
+
 	std::array<std::unique_ptr<task>, GL_THREAD_NUMBER> taskQueue;
 	
 	vec2f blastPoint;
@@ -174,6 +186,6 @@ void gl::task::particle_generate(particle& p, const vec2f& v)
 	generate_random(GL_PARTICLE_MIN_LIFE_MS, GL_PARTICLE_MAX_LIFE_MS, p.life, p.rand);
 }
 
-bool gl::task::probability_perc(int perc, int rnd) {
+bool gl::probability_perc(int perc, int rnd) {
 	return (rnd % 100) < perc;
 }
